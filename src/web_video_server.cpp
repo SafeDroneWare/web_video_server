@@ -13,7 +13,7 @@
 namespace web_video_server
 {
 
-static void ros_connection_logger(async_web_server_cpp::HttpServerRequestHandler forward,
+static bool ros_connection_logger(async_web_server_cpp::HttpServerRequestHandler forward,
                                   const async_web_server_cpp::HttpRequest &request,
                                   async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                   const char* end)
@@ -123,7 +123,7 @@ void WebVideoServer::cleanup_inactive_streams()
   }
 }
 
-void WebVideoServer::handle_stream(const async_web_server_cpp::HttpRequest &request,
+bool WebVideoServer::handle_stream(const async_web_server_cpp::HttpRequest &request,
                                    async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                    const char* end)
 {
@@ -141,9 +141,10 @@ void WebVideoServer::handle_stream(const async_web_server_cpp::HttpRequest &requ
     async_web_server_cpp::HttpReply::stock_reply(async_web_server_cpp::HttpReply::not_found)(request, connection, begin,
                                                                                              end);
   }
+  return true;
 }
 
-void WebVideoServer::handle_snapshot(const async_web_server_cpp::HttpRequest &request,
+bool WebVideoServer::handle_snapshot(const async_web_server_cpp::HttpRequest &request,
                                      async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                      const char* end)
 {
@@ -152,9 +153,10 @@ void WebVideoServer::handle_snapshot(const async_web_server_cpp::HttpRequest &re
 
   boost::mutex::scoped_lock lock(subscriber_mutex_);
   image_subscribers_.push_back(streamer);
+  return true;
 }
 
-void WebVideoServer::handle_stream_viewer(const async_web_server_cpp::HttpRequest &request,
+bool WebVideoServer::handle_stream_viewer(const async_web_server_cpp::HttpRequest &request,
                                           async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                           const char* end)
 {
@@ -178,9 +180,10 @@ void WebVideoServer::handle_stream_viewer(const async_web_server_cpp::HttpReques
     async_web_server_cpp::HttpReply::stock_reply(async_web_server_cpp::HttpReply::not_found)(request, connection, begin,
                                                                                              end);
   }
+  return true;
 }
 
-void WebVideoServer::handle_list_streams(const async_web_server_cpp::HttpRequest &request,
+bool WebVideoServer::handle_list_streams(const async_web_server_cpp::HttpRequest &request,
                                          async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                          const char* end)
 {
@@ -249,6 +252,7 @@ void WebVideoServer::handle_list_streams(const async_web_server_cpp::HttpRequest
     connection->write("</li>");
   }
   connection->write("</ul></body></html>");
+  return true;
 }
 
 }
