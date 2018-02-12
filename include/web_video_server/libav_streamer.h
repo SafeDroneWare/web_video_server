@@ -15,16 +15,17 @@ extern "C"
 #include <libswscale/swscale.h>
 #include <libavutil/opt.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/imgutils.h>
 }
 
 namespace web_video_server
 {
 
-class LibavStreamer : public ImageStreamer
+class LibavStreamer : public ImageTransportImageStreamer
 {
 public:
   LibavStreamer(const async_web_server_cpp::HttpRequest &request, async_web_server_cpp::HttpConnectionPtr connection,
-                image_transport::ImageTransport it, const std::string &format_name, const std::string &codec_name,
+                ros::NodeHandle& nh, const std::string &format_name, const std::string &codec_name,
                 const std::string &content_type);
 
   ~LibavStreamer();
@@ -40,10 +41,10 @@ protected:
   AVCodecContext* codec_context_;
   AVStream* video_stream_;
 
+  AVDictionary* opt_;   // container format options
+
 private:
   AVFrame* frame_;
-  AVPicture* picture_;
-  AVPicture* tmp_picture_;
   struct SwsContext* sws_context_;
   ros::WallTime first_image_timestamp_;
   boost::mutex encode_mutex_;
@@ -55,6 +56,8 @@ private:
   int qmin_;
   int qmax_;
   int gop_;
+
+  uint8_t* io_buffer_;  // custom IO buffer
 };
 
 class LibavStreamerType : public ImageStreamerType
@@ -64,7 +67,7 @@ public:
 
   boost::shared_ptr<ImageStreamer> create_streamer(const async_web_server_cpp::HttpRequest &request,
                                                    async_web_server_cpp::HttpConnectionPtr connection,
-                                                   image_transport::ImageTransport it);
+                                                   ros::NodeHandle& nh);
 
   std::string create_viewer(const async_web_server_cpp::HttpRequest &request);
 

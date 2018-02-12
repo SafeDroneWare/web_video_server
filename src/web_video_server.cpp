@@ -6,19 +6,27 @@
 #include <opencv2/opencv.hpp>
 
 #include "web_video_server/web_video_server.h"
+#include "web_video_server/ros_compressed_streamer.h"
 #include "web_video_server/jpeg_streamers.h"
 #include "web_video_server/vp8_streamer.h"
+#include "web_video_server/h264_streamer.h"
+#include "web_video_server/vp9_streamer.h"
 #include "async_web_server_cpp/http_reply.hpp"
 
 namespace web_video_server
 {
+
+static bool __verbose;
 
 static bool ros_connection_logger(async_web_server_cpp::HttpServerRequestHandler forward,
                                   const async_web_server_cpp::HttpRequest &request,
                                   async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                   const char* end)
 {
-  ROS_INFO_STREAM("Handling Request: " << request.uri);
+  if (__verbose)
+  {
+    ROS_INFO_STREAM("Handling Request: " << request.uri);
+  }
   try
   {
     forward(request, connection, begin, end);
@@ -33,12 +41,13 @@ static bool ros_connection_logger(async_web_server_cpp::HttpServerRequestHandler
 }
 
 WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh) :
-    nh_(nh), image_transport_(nh), handler_group_(
+    nh_(nh), handler_group_(
         async_web_server_cpp::HttpReply::stock_reply(async_web_server_cpp::HttpReply::not_found))
 {
   cleanup_timer_ = nh.createTimer(ros::Duration(0.5), boost::bind(&WebVideoServer::cleanup_inactive_streams, this));
 
   private_nh.param("port", port_, 8080);
+  private_nh.param("verbose", __verbose, true);
 
   private_nh.param<std::string>("address", address_, "0.0.0.0");
 
@@ -51,7 +60,10 @@ WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
   // required single-threaded, once-only init:
   LibavStreamer::SetupAVLibrary();
   stream_types_["mjpeg"] = boost::shared_ptr<ImageStreamerType>(new MjpegStreamerType());
+  stream_types_["ros_compressed"] = boost::shared_ptr<ImageStreamerType>(new RosCompressedStreamerType());
   stream_types_["vp8"] = boost::shared_ptr<ImageStreamerType>(new Vp8StreamerType());
+  stream_types_["h264"] = boost::shared_ptr<ImageStreamerType>(new H264StreamerType());
+  stream_types_["vp9"] = boost::shared_ptr<ImageStreamerType>(new Vp9StreamerType());
 
   handler_group_.addHandlerForPath("/", boost::bind(&WebVideoServer::handle_list_streams, this, _1, _2, _3, _4));
   handler_group_.addHandlerForPath("/stream", boost::bind(&WebVideoServer::handle_stream, this, _1, _2, _3, _4));
@@ -59,10 +71,18 @@ WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
                                    boost::bind(&WebVideoServer::handle_stream_viewer, this, _1, _2, _3, _4));
   handler_group_.addHandlerForPath("/snapshot", boost::bind(&WebVideoServer::handle_snapshot, this, _1, _2, _3, _4));
 
-  server_.reset(
-      new async_web_server_cpp::HttpServer(address_, boost::lexical_cast<std::string>(port_),
-                                           boost::bind(ros_connection_logger, handler_group_, _1, _2, _3, _4),
-                                           server_threads));
+  try
+  {
+    server_.reset(
+        new async_web_server_cpp::HttpServer(address_, boost::lexical_cast<std::string>(port_),
+                                             boost::bind(ros_connection_logger, handler_group_, _1, _2, _3, _4),
+                                             server_threads));
+  }
+  catch(boost::exception& e)
+  {
+    ROS_ERROR("Exception when creating the web server! %s:%d", address_.c_str(), port_);
+    throw;
+  }
 }
 
 WebVideoServer::~WebVideoServer()
@@ -107,22 +127,20 @@ void WebVideoServer::restreamFrames( double max_age )
 
 void WebVideoServer::cleanup_inactive_streams()
 {
-  boost::mutex::scoped_lock lock(subscriber_mutex_);
+  boost::mutex::scoped_lock lock(subscriber_mutex_, boost::try_to_lock);
   if (lock)
   {
     typedef std::vector<boost::shared_ptr<ImageStreamer> >::iterator itr_type;
-    itr_type itr = image_subscribers_.begin();
-    while ( itr != image_subscribers_.end() )
+    itr_type new_end = std::partition(image_subscribers_.begin(), image_subscribers_.end(),
+                                      !boost::bind(&ImageStreamer::isInactive, _1));
+    if (__verbose)
     {
-      if ( (*itr)->isInactive() ) {
-	ROS_INFO_STREAM("Removing Stream: " << (*itr)->getTopic() << " (streams left: "<< (image_subscribers_.end() - itr ) -1 << ")");
-	image_subscribers_.erase( itr );
-	itr = image_subscribers_.begin();
-      }
-      else {
-	++itr;
+      for (itr_type itr = new_end; itr < image_subscribers_.end(); ++itr)
+      {
+        ROS_INFO_STREAM("Removed Stream: " << (*itr)->getTopic());
       }
     }
+    image_subscribers_.erase(new_end, image_subscribers_.end());
   }
 }
 
@@ -133,8 +151,7 @@ bool WebVideoServer::handle_stream(const async_web_server_cpp::HttpRequest &requ
   std::string type = request.get_query_param_value_or_default("type", "mjpeg");
   if (stream_types_.find(type) != stream_types_.end())
   {
-    boost::shared_ptr<ImageStreamer> streamer = stream_types_[type]->create_streamer(request, connection,
-                                                                                     image_transport_);
+    boost::shared_ptr<ImageStreamer> streamer = stream_types_[type]->create_streamer(request, connection, nh_);
     streamer->start();
     boost::mutex::scoped_lock lock(subscriber_mutex_);
     image_subscribers_.push_back(streamer);
@@ -151,7 +168,7 @@ bool WebVideoServer::handle_snapshot(const async_web_server_cpp::HttpRequest &re
                                      async_web_server_cpp::HttpConnectionPtr connection, const char* begin,
                                      const char* end)
 {
-  boost::shared_ptr<ImageStreamer> streamer(new JpegSnapshotStreamer(request, connection, image_transport_));
+  boost::shared_ptr<ImageStreamer> streamer(new JpegSnapshotStreamer(request, connection, nh_));
   streamer->start();
 
   boost::mutex::scoped_lock lock(subscriber_mutex_);
@@ -253,6 +270,23 @@ bool WebVideoServer::handle_list_streams(const async_web_server_cpp::HttpRequest
       connection->write("</ul>");
     }
     connection->write("</li>");
+  }
+  connection->write("</ul>");
+  // Add the rest of the image topics that don't have camera_info.
+  connection->write("<ul>");
+  std::vector<std::string>::iterator image_topic_itr = image_topics.begin();
+  for (; image_topic_itr != image_topics.end();) {
+    connection->write("<li><a href=\"/stream_viewer?topic=");
+    connection->write(*image_topic_itr);
+    connection->write("\">");
+    connection->write(*image_topic_itr);
+    connection->write("</a> (");
+    connection->write("<a href=\"/snapshot?topic=");
+    connection->write(*image_topic_itr);
+    connection->write("\">Snapshot</a>)");
+    connection->write("</li>");
+
+    image_topic_itr = image_topics.erase(image_topic_itr);
   }
   connection->write("</ul></body></html>");
   return true;
