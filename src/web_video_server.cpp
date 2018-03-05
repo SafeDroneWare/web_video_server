@@ -201,11 +201,11 @@ bool WebVideoServer::handle_list_streams(const async_web_server_cpp::HttpRequest
   for (it = topics.begin(); it != topics.end(); ++it)
   {
     const ros::master::TopicInfo &topic = *it;
-    if (topic.datatype == image_message_type)
+    if (topic.datatype == image_message_type || topic.datatype == "sdw_hal_msgs/Image")
     {
       image_topics.push_back(topic.name);
     }
-    else if (topic.datatype == camera_info_message_type)
+    else if (topic.datatype == camera_info_message_type || topic.datatype == "sdw_hal_msgs/CameraInfo")
     {
       camera_info_topics.push_back(topic.name);
     }
