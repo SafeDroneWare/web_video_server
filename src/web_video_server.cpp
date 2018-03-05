@@ -47,6 +47,7 @@ WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
   cleanup_timer_ = nh.createTimer(ros::Duration(0.5), boost::bind(&WebVideoServer::cleanup_inactive_streams, this));
 
   private_nh.param("port", port_, 8080);
+  private_nh.param("tos", tos_, 0);
   private_nh.param("verbose", __verbose, true);
 
   private_nh.param<std::string>("address", address_, "0.0.0.0");
@@ -76,7 +77,7 @@ WebVideoServer::WebVideoServer(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
     server_.reset(
         new async_web_server_cpp::HttpServer(address_, boost::lexical_cast<std::string>(port_),
                                              boost::bind(ros_connection_logger, handler_group_, _1, _2, _3, _4),
-                                             server_threads));
+                                             server_threads, tos_));
   }
   catch(boost::exception& e)
   {
