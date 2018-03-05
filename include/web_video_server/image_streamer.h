@@ -13,19 +13,46 @@ namespace web_video_server
 class ImageStreamer
 {
 public:
-  ImageStreamer(const async_web_server_cpp::HttpRequest &request, async_web_server_cpp::HttpConnectionPtr connection,
-                image_transport::ImageTransport it);
+  ImageStreamer(const async_web_server_cpp::HttpRequest &request,
+		async_web_server_cpp::HttpConnectionPtr connection,
+		ros::NodeHandle& nh);
 
   virtual ~ImageStreamer();
 
-  void start();
+  virtual void start() = 0;
 
-  bool isInactive();
+  bool isInactive()
+  {
+    return inactive_;
+  }
+  ;
 
   std::string getTopic()
   {
     return topic_;
   }
+
+  /**
+   * Restreams the last received image frame if older than max_age.
+   */
+  virtual void restreamFrame(double max_age) = 0;
+protected:
+  async_web_server_cpp::HttpConnectionPtr connection_;
+  async_web_server_cpp::HttpRequest request_;
+  ros::NodeHandle nh_;
+  bool inactive_;
+  image_transport::Subscriber image_sub_;
+  std::string topic_;
+};
+
+
+class ImageTransportImageStreamer : public ImageStreamer
+{
+public:
+  ImageTransportImageStreamer(const async_web_server_cpp::HttpRequest &request, async_web_server_cpp::HttpConnectionPtr connection,
+			      ros::NodeHandle& nh);
+
+  virtual void start();
 
   /**
    * Restreams the last received image frame if older than max_age.
@@ -36,18 +63,14 @@ protected:
 
   virtual void initialize(const cv::Mat &);
 
-  async_web_server_cpp::HttpConnectionPtr connection_;
-  async_web_server_cpp::HttpRequest request_;
-  bool inactive_;
   image_transport::Subscriber image_sub_;
-  std::string topic_;
   int output_width_;
   int output_height_;
   bool invert_;
   ros::WallTime last_frame;
   cv::Mat output_size_image;
   boost::mutex send_mutex_;
-
+  std::string default_transport_;
 private:
   image_transport::ImageTransport it_;
   bool initialized_;
@@ -60,7 +83,7 @@ class ImageStreamerType
 public:
   virtual boost::shared_ptr<ImageStreamer> create_streamer(const async_web_server_cpp::HttpRequest &request,
                                                            async_web_server_cpp::HttpConnectionPtr connection,
-                                                           image_transport::ImageTransport it) = 0;
+                                                           ros::NodeHandle& nh) = 0;
 
   virtual std::string create_viewer(const async_web_server_cpp::HttpRequest &request) = 0;
 };
